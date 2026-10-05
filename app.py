@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from bot import generate_signal
+import time
 
 st.set_page_config(
     page_title="Pocket Option Signal Bot",
@@ -30,6 +31,7 @@ st.write("ZigZag")
 st.write("Keltner Channel")
 st.write("Stochastic Oscillator")
 
+
 @st.cache_data(ttl=30)
 def get_market_data(symbol):
     data = yf.download(
@@ -49,6 +51,7 @@ def get_market_data(symbol):
     data.columns = [str(c).lower() for c in data.columns]
 
     required = ["open", "high", "low", "close"]
+
     if not all(c in data.columns for c in required):
         return pd.DataFrame()
 
@@ -58,18 +61,32 @@ def get_market_data(symbol):
 df = get_market_data(assets[asset])
 
 if df.empty:
-    st.warning("No live market candle data received.")
+    st.error("No live market candle data received.")
     st.stop()
 
 signal = generate_signal(df)
 
-st.success("Live market data connected")
+st.success("🟢 Live market data connected")
 
 st.subheader("Signal")
+
+if signal == "CALL":
+    st.success("📈 CALL")
+elif signal == "PUT":
+    st.error("📉 PUT")
+else:
+    st.warning("⏳ WAIT")
+
 st.metric("Current Signal", signal)
 
 st.write(f"Asset: {asset} • Duration: {duration}")
 
 st.caption(
-    "This app analyzes regular market data and does not directly place Pocket Option trades."
+    "Regular market analysis using live market data. "
+    "The app does not directly place Pocket Option trades."
 )
+
+st.caption("🔄 Market data refreshes automatically every 30 seconds.")
+
+time.sleep(30)
+st.rerun()
