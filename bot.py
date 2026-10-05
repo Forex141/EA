@@ -2,21 +2,17 @@ import pandas as pd
 import numpy as np
 
 
-# ==============================
+# ==========================================
 # Pocket Option Signal Engine
-# Indicators:
-# - ZigZag
-# - Keltner Channel
-# - Stochastic Oscillator
-# ==============================
+# ZigZag + Keltner Channel + Stochastic
+# ==========================================
 
 def calculate_indicators(df):
     df = df.copy()
 
-    # EMA for Keltner Channel
+    # Keltner Channel
     df["ema"] = df["close"].ewm(span=20, adjust=False).mean()
 
-    # ATR
     high_low = df["high"] - df["low"]
     high_close = abs(df["high"] - df["close"].shift(1))
     low_close = abs(df["low"] - df["close"].shift(1))
@@ -28,7 +24,6 @@ def calculate_indicators(df):
 
     df["atr"] = tr.rolling(10).mean()
 
-    # Keltner Channel
     df["upper"] = df["ema"] + (2 * df["atr"])
     df["lower"] = df["ema"] - (2 * df["atr"])
 
@@ -36,14 +31,17 @@ def calculate_indicators(df):
     lowest_low = df["low"].rolling(14).min()
     highest_high = df["high"].rolling(14).max()
 
-    df["%K"] = (
-        100 * (df["close"] - lowest_low) /
-        (highest_high - lowest_low)
+    denominator = highest_high - lowest_low
+
+    df["%K"] = np.where(
+        denominator != 0,
+        100 * (df["close"] - lowest_low) / denominator,
+        50
     )
 
-    df["%D"] = df["%K"].rolling(3).mean()
+    df["%D"] = pd.Series(df["%K"], index=df.index).rolling(3).mean()
 
-    # Simple ZigZag-style swing detection
+    # ZigZag-style swing detection
     df["swing_high"] = (
         (df["high"] > df["high"].shift(1)) &
         (df["high"] > df["high"].shift(-1))
@@ -57,43 +55,97 @@ def calculate_indicators(df):
     return df
 
 
-def generate_signal(df):
+def analyze_signal(df):
     df = calculate_indicators(df)
+
+    if len(df) < 20:
+        return {
+            "signal": "WAIT",
+            "confidence": 0,
+            "call_score": 0,
+            "put_score": 0
+        }
 
     last = df.iloc[-1]
 
     call_score = 0
     put_score = 0
 
+    # --------------------------
     # Keltner Channel
+    # --------------------------
+
     if last["close"] <= last["lower"]:
         call_score += 1
 
     if last["close"] >= last["upper"]:
         put_score += 1
 
+    # --------------------------
     # Stochastic
+    # --------------------------
+
     if last["%K"] < 20 and last["%K"] > last["%D"]:
         call_score += 1
 
     if last["%K"] > 80 and last["%K"] < last["%D"]:
         put_score += 1
 
-    # ZigZag-style reversal
-    if last["swing_low"]:
+    # --------------------------
+    # ZigZag
+    # --------------------------
+
+    if bool(last["swing_low"]):
         call_score += 1
 
-    if last["swing_high"]:
+    if bool(last["swing_high"]):
         put_score += 1
 
-    # Require confirmation from multiple conditions
+    # --------------------------
+    # Signal decision
+    # --------------------------
+
+    total = call_score + put_score
+
+    if total == 0:
+        return {
+            "signal": "WAIT",
+            "confidence": 0,
+            "call_score": call_score,
+            "put_score": put_score
+        }
+
     if call_score >= 2 and call_score > put_score:
-        return "CALL"
+        confidence = round((call_score / 3) * 100)
+
+        return {
+            "signal": "CALL",
+            "confidence": confidence,
+            "call_score": call_score,
+            "put_score": put_score
+        }
 
     if put_score >= 2 and put_score > call_score:
-        return "PUT"
+        confidence = round((put_score / 3) * 100)
 
-    return "WAIT"
+        return {
+            "signal": "PUT",
+            "confidence": confidence,
+            "call_score": call_score,
+            "put_score": put_score
+        }
+
+    return {
+        "signal": "WAIT",
+        "confidence": 0,
+        "call_score": call_score,
+        "put_score": put_score
+    }
+
+
+def generate_signal(df):
+    result = analyze_signal(df)
+    return result["signal"]
 
 
 if __name__ == "__main__":
